@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Study Shield</string>
+    <string name="service_desc">Study Shield uses this only to see which app is open, so it can block the apps you chose during a focus session. It does not read your screen or collect any data.</string>
+</resources>

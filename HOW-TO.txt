@@ -1,0 +1,28 @@
+STUDY SHIELD - ANDROID APP (ROUND 1)
+
+SEE THE SCREENS ON YOUR COMPUTER FIRST
+Open app/src/main/assets/www/index.html in Chrome. It shows the real screens with sample apps.
+(Blocking only works on an Android phone.)
+
+BUILD THE APK WITH GITHUB (no Android Studio needed)
+1. Make a free account at github.com and click New repository. Name it study-shield. Create it.
+2. Click "uploading an existing file". Open this folder, select EVERYTHING inside it
+   (including the .github folder), and drag it into the page. Click Commit changes.
+   If the .github folder did not upload: click Add file > Create new file, type
+   .github/workflows/build.yml as the name, paste the text from that file, and commit.
+3. Click the Actions tab. A run named "Build APK" starts by itself (about 3-6 minutes).
+   If nothing starts: Actions > Build APK > Run workflow.
+4. When it shows a green tick, open the run and download "study-shield-apk" at the bottom.
+   Unzip it. Inside is app-debug.apk.
+5. Send app-debug.apk to your Android phone and open it. Allow "install unknown apps" if asked.
+
+FIRST USE ON THE PHONE
+1. Open Study Shield > Apps and choose the apps to block.
+2. On Focus, turn on the permission: Open Accessibility settings > Study Shield > On.
+3. If the switch is greyed out (Android 13 or newer): long-press the Study Shield icon > App info >
+   three dots (top right) > Allow restricted settings. Then try again.
+4. For Stats: open Stats > Open Usage access settings > Study Shield > allow. Then screen time shows.
+   (Focus time and streak work without it.)
+5. Start a focus session and open a blocked app. A "Stay focused" screen should cover it.
+
+If the build shows red errors, copy the error text and send it to Claude.
