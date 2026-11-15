@@ -1,26 +1,56 @@
 package com.brukeai.studyshield
 
-import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 
-class ShieldService : AccessibilityService() {
+class ShieldService : Service() {
     private var overlay: View? = null
     private var timeView: TextView? = null
     private var nameView: TextView? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var isMonitoring = false
+
+    private val watcher = object : Runnable {
+        override fun run() {
+            if (!isMonitoring) return
+            val p = prefs()
+            val active = p.getLong("endAt", 0L) > System.currentTimeMillis()
+            if (!active) {
+                hide()
+                stopSelf()
+                return
+            }
+            val pkg = getForegroundApp()
+            val blocked = p.getStringSet("blocked", emptySet()) ?: emptySet()
+            if (pkg != null && pkg != packageName && pkg != "com.android.systemui" && blocked.contains(pkg)) {
+                show(pkg)
+            } else if (pkg != null && !blocked.contains(pkg)) {
+                hide()
+            }
+            handler.postDelayed(this, 800)
+        }
+    }
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -41,24 +71,61 @@ class ShieldService : AccessibilityService() {
         return String.format("%02d:%02d", s / 60, s % 60)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName || pkg == "com.android.systemui") return
-        val p = prefs()
-        val active = p.getLong("endAt", 0L) > System.currentTimeMillis()
-        val blocked = p.getStringSet("blocked", emptySet()) ?: emptySet()
-        if (active && blocked.contains(pkg)) show(pkg) else hide()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startNotification()
+        if (!isMonitoring) {
+            isMonitoring = true
+            handler.post(watcher)
+        }
+        return START_STICKY
+    }
+
+    private fun getForegroundApp(): String? {
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val end = System.currentTimeMillis()
+        val events = usm.queryEvents(end - 5000, end)
+        val e = UsageEvents.Event()
+        var current: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            if (e.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                current = e.packageName
+            }
+        }
+        return current
+    }
+
+    private fun startNotification() {
+        val channelId = "ss_shield_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(channelId, "Study Shield", NotificationManager.IMPORTANCE_LOW)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
+        }
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        val notif = builder
+            .setContentTitle("Study Shield")
+            .setContentText("Focus session is active")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setOngoing(true)
+            .build()
+        startForeground(1, notif)
     }
 
     private fun show(pkg: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) return
+
         val label = try {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         } catch (e: Exception) {
             pkg
         }
         if (overlay != null) {
-            nameView?.text = label + " is blocked"
+            nameView?.text = "$label is blocked"
             return
         }
         val density = resources.displayMetrics.density
@@ -79,7 +146,7 @@ class ShieldService : AccessibilityService() {
         root.setPadding(dp(32), dp(32), dp(32), dp(32))
 
         root.addView(tv("STAY FOCUSED", 13f, "#1d6fb8", false))
-        val name = tv(label + " is blocked", 26f, "#10243a", true)
+        val name = tv("$label is blocked", 26f, "#10243a", true)
         name.setPadding(0, dp(10), 0, dp(6))
         nameView = name
         root.addView(name)
@@ -91,7 +158,7 @@ class ShieldService : AccessibilityService() {
 
         val btn = Button(this)
         btn.text = "Back to study"
-        btn.setAllCaps(false)
+        btn.isAllCaps = false
         btn.textSize = 16f
         btn.setTextColor(Color.WHITE)
         val bg = GradientDrawable()
@@ -99,15 +166,26 @@ class ShieldService : AccessibilityService() {
         bg.cornerRadius = dp(14).toFloat()
         btn.background = bg
         btn.setOnClickListener {
-            performGlobalAction(GLOBAL_ACTION_HOME)
+            val home = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(home)
             hide()
         }
         root.addView(btn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)))
 
+        val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            overlayType,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.OPAQUE
         )
@@ -115,7 +193,7 @@ class ShieldService : AccessibilityService() {
             (getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(root, lp)
             overlay = root
             handler.post(ticker)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
     }
 
@@ -125,16 +203,16 @@ class ShieldService : AccessibilityService() {
         overlay = null
         try {
             (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
     }
 
-    override fun onInterrupt() {
-        hide()
-    }
-
     override fun onDestroy() {
+        isMonitoring = false
+        handler.removeCallbacks(watcher)
         hide()
         super.onDestroy()
     }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }
